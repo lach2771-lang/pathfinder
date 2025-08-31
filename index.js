@@ -14,6 +14,16 @@ const CONFIG = {
     debug: false
 }
 
+// Resolve KeyBinding class for reliable key state control in 1.8.9
+const KeyBinding = (function resolveKeyBindingClass() {
+    try {
+        return Java.type("net.minecraft.client.settings.KeyBinding")
+    } catch (e) {
+        // Rhino fallback
+        return Packages.net.minecraft.client.settings.KeyBinding
+    }
+})()
+
 // Path Node class
 class PathNode {
     constructor(pos, parent, gCost, hCost) {
@@ -353,13 +363,23 @@ class ChatTriggersPathfinder {
         try {
             // Release all movement keys
             const gameSettings = Client.getMinecraft().field_71474_y
-            gameSettings.field_74351_w.field_74513_e = false // forward
-            gameSettings.field_74368_y.field_74513_e = false // back
-            gameSettings.field_74370_x.field_74513_e = false // left
-            gameSettings.field_74366_z.field_74513_e = false // right
-            gameSettings.field_74311_E.field_74513_e = false // sneak
-            gameSettings.field_74308_b.field_74513_e = false // sprint
-            gameSettings.field_74314_A.field_74513_e = false // jump
+            const binds = [
+                gameSettings.field_74351_w, // forward
+                gameSettings.field_74368_y, // back
+                gameSettings.field_74370_x, // left
+                gameSettings.field_74366_z, // right
+                gameSettings.field_74311_E, // sneak
+                gameSettings.field_74308_b, // sprint
+                gameSettings.field_74314_A  // jump
+            ]
+
+            binds.forEach(bind => {
+                try {
+                    bind.field_74513_e = false
+                    // Also inform Minecraft input system
+                    KeyBinding.setKeyBindState(bind.func_151463_i(), false)
+                } catch (e) {}
+            })
         } catch (error) {
             // Ignore key binding errors
         }
@@ -568,7 +588,11 @@ class ChatTriggersPathfinder {
             }
 
             if (keyBind) {
-                keyBind.field_74513_e = pressed // pressed
+                // Set pressed flag and propagate to the input system
+                keyBind.field_74513_e = pressed
+                try {
+                    KeyBinding.setKeyBindState(keyBind.func_151463_i(), pressed)
+                } catch (e) {}
             }
         } catch (error) {
             // Ignore key binding errors
