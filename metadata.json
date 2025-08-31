@@ -1,0 +1,7 @@
+{
+    "name": "Pathfinder",
+    "creator": "Assistant",
+    "description": "A* pathfinding with working movement controls",
+    "version": "1.0.0",
+    "entry": "index.js"
+}
