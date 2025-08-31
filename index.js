@@ -171,9 +171,9 @@ class ChatTriggersPathfinder {
             const headBlock = World.getBlockAt(to.x, to.y + 1, to.z)
             const groundBlock = World.getBlockAt(to.x, to.y - 1, to.z)
             
-            const footClear = !footBlock || footBlock.getID() === 0
-            const headClear = !headBlock || headBlock.getID() === 0
-            const hasGround = groundBlock && groundBlock.getID() !== 0
+            const footClear = this.isPassableBlock(footBlock)
+            const headClear = this.isPassableBlock(headBlock)
+            const hasGround = this.isSolidGroundBlock(groundBlock)
             
             // If moving horizontally, check for obstruction
             if (from.y === to.y) {
@@ -185,8 +185,8 @@ class ChatTriggersPathfinder {
                     // Diagonal movement - check both adjacent sides
                     const side1Block = World.getBlockAt(from.x + dx, from.y, from.z)
                     const side2Block = World.getBlockAt(from.x, from.y, from.z + dz)
-                    const side1Clear = !side1Block || side1Block.getID() === 0
-                    const side2Clear = !side2Block || side2Block.getID() === 0
+                    const side1Clear = this.isPassableBlock(side1Block)
+                    const side2Clear = this.isPassableBlock(side2Block)
                     
                     return footClear && headClear && hasGround && (side1Clear || side2Clear)
                 }
@@ -220,10 +220,10 @@ class ChatTriggersPathfinder {
             const headBlock = World.getBlockAt(pos.x, pos.y + 1, pos.z)
             const groundBlock = World.getBlockAt(pos.x, pos.y - 1, pos.z)
 
-            // Simple logic: foot and head should be passable, ground should exist
-            const footClear = !footBlock || footBlock.getID() === 0
-            const headClear = !headBlock || headBlock.getID() === 0
-            const hasGround = groundBlock && groundBlock.getID() !== 0
+            // Simple logic: foot and head should be passable, ground should exist and be solid
+            const footClear = this.isPassableBlock(footBlock)
+            const headClear = this.isPassableBlock(headBlock)
+            const hasGround = this.isSolidGroundBlock(groundBlock)
 
             return footClear && headClear && hasGround
         } catch (error) {
@@ -232,17 +232,48 @@ class ChatTriggersPathfinder {
         }
     }
 
-    // Check if block is passable (simplified)
+    // Check if block is passable (robust for ChatTriggers API variants)
     isPassableBlock(block) {
         if (!block) return true
-        
         try {
-            // Use Minecraft's built-in passable check if available
             const blockType = block.type || block
-            return blockType.getID() === 0 // Air is always passable
+            if (blockType && typeof blockType.getID === "function") {
+                return blockType.getID() === 0
+            }
+            if (typeof block.getID === "function") {
+                return block.getID() === 0
+            }
+            const name = (typeof blockType.getRegistryName === "function"
+                ? blockType.getRegistryName()
+                : (typeof blockType.getName === "function" ? blockType.getName() : (blockType.name || "")))
+                .toString()
+                .toLowerCase()
+            return name.includes("air")
         } catch (error) {
-            return true // If unsure, assume passable
+            // If unsure, assume passable to avoid over-blocking
+            return true
         }
+    }
+
+    // Check if block is a liquid (not solid ground)
+    isLiquidBlock(block) {
+        if (!block) return false
+        try {
+            const blockType = block.type || block
+            const name = (typeof blockType.getRegistryName === "function"
+                ? blockType.getRegistryName()
+                : (typeof blockType.getName === "function" ? blockType.getName() : (blockType.name || "")))
+                .toString()
+                .toLowerCase()
+            return name.includes("water") || name.includes("lava")
+        } catch (error) {
+            return false
+        }
+    }
+
+    // Determine if a block can serve as solid ground support
+    isSolidGroundBlock(block) {
+        return !!block && !this.isPassableBlock(block) && !this.isLiquidBlock(block)
     }
 
     // Position helper functions
@@ -254,6 +285,40 @@ class ChatTriggersPathfinder {
 
     posKey(pos) {
         return `${Math.floor(pos.x)},${Math.floor(pos.y)},${Math.floor(pos.z)}`
+    }
+
+    // Resolve a target position to a nearby walkable block space
+    resolveGoalToWalkable(goalPos) {
+        const base = {
+            x: Math.floor(goalPos.x),
+            y: Math.floor(goalPos.y),
+            z: Math.floor(goalPos.z)
+        }
+
+        if (this.isWalkable(base)) return base
+
+        const verticalOffsets = [1, 2, -1, -2, 3, -3]
+        for (const dy of verticalOffsets) {
+            const candidate = { x: base.x, y: base.y + dy, z: base.z }
+            if (this.isWalkable(candidate)) return candidate
+        }
+
+        const maxRadius = 2
+        for (let radius = 1; radius <= maxRadius; radius++) {
+            for (let dx = -radius; dx <= radius; dx++) {
+                for (let dz = -radius; dz <= radius; dz++) {
+                    if (dx === 0 && dz === 0) continue
+                    const candidateBase = { x: base.x + dx, y: base.y, z: base.z + dz }
+                    if (this.isWalkable(candidateBase)) return candidateBase
+                    for (const dy of verticalOffsets) {
+                        const candidate = { x: candidateBase.x, y: candidateBase.y + dy, z: candidateBase.z }
+                        if (this.isWalkable(candidate)) return candidate
+                    }
+                }
+            }
+        }
+
+        return null
     }
 
     // Start pathfinding to target
@@ -287,13 +352,14 @@ class ChatTriggersPathfinder {
     stopMovement() {
         try {
             // Release all movement keys
-            Client.getMinecraft().field_71474_y.field_74351_w.field_74513_e = false // keyBindForward
-            Client.getMinecraft().field_71474_y.field_74368_y.field_74513_e = false // keyBindLeft  
-            Client.getMinecraft().field_71474_y.field_74366_z.field_74513_e = false // keyBindBack
-            Client.getMinecraft().field_71474_y.field_74370_x.field_74513_e = false // keyBindRight
-            Client.getMinecraft().field_71474_y.field_74314_A.field_74513_e = false // keyBindSneak
-            Client.getMinecraft().field_71474_y.field_74308_b.field_74513_e = false // keyBindSprint
-            Client.getMinecraft().field_71474_y.field_74314_A.field_74513_e = false // keyBindJump
+            const gameSettings = Client.getMinecraft().field_71474_y
+            gameSettings.field_74351_w.field_74513_e = false // forward
+            gameSettings.field_74368_y.field_74513_e = false // back
+            gameSettings.field_74370_x.field_74513_e = false // left
+            gameSettings.field_74366_z.field_74513_e = false // right
+            gameSettings.field_74311_E.field_74513_e = false // sneak
+            gameSettings.field_74308_b.field_74513_e = false // sprint
+            gameSettings.field_74314_A.field_74513_e = false // jump
         } catch (error) {
             // Ignore key binding errors
         }
@@ -308,7 +374,7 @@ class ChatTriggersPathfinder {
             z: Math.floor(player.field_70161_v)  // posZ
         }
 
-        const goalPos = {
+        const rawGoalPos = {
             x: Math.floor(this.target.x),
             y: Math.floor(this.target.y),
             z: Math.floor(this.target.z)
@@ -327,10 +393,23 @@ class ChatTriggersPathfinder {
         // Generate new path if needed
         if (!this.currentPath || this.currentPathIndex >= this.currentPath.length) {
             if (CONFIG.debug) {
-                ChatLib.chat(`&7Generating path from ${playerPos.x},${playerPos.y},${playerPos.z} to ${goalPos.x},${goalPos.y},${goalPos.z}`)
+                ChatLib.chat(`&7Generating path from ${playerPos.x},${playerPos.y},${playerPos.z} to ${rawGoalPos.x},${rawGoalPos.y},${rawGoalPos.z}`)
             }
 
-            this.currentPath = this.findPath(playerPos, goalPos)
+            const resolvedGoal = this.resolveGoalToWalkable(rawGoalPos)
+            if (!resolvedGoal) {
+                if (CONFIG.debug) {
+                    ChatLib.chat("&cTarget is not reachable: no nearby walkable space")
+                }
+                this.stopPathfinding()
+                return
+            }
+
+            if (CONFIG.debug && (resolvedGoal.x !== rawGoalPos.x || resolvedGoal.y !== rawGoalPos.y || resolvedGoal.z !== rawGoalPos.z)) {
+                ChatLib.chat(`&7Resolved goal to ${resolvedGoal.x},${resolvedGoal.y},${resolvedGoal.z}`)
+            }
+
+            this.currentPath = this.findPath(playerPos, resolvedGoal)
             this.currentPathIndex = 0
 
             if (!this.currentPath || this.currentPath.length === 0) {
