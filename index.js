@@ -10,7 +10,7 @@ const CONFIG = {
     sprintDistance: 10.0,
     rotationSpeed: 4.5,
     minYawDiff: 5.0,
-    maxIterations: 5000,
+    maxIterations: 50000,
     debug: false
 }
 
@@ -368,7 +368,7 @@ class ChatTriggersPathfinder {
     // Main pathfinding execution
     executePathfinding() {
         const player = Player.getPlayer()
-        const playerPos = {
+        const rawStartPos = {
             x: Math.floor(player.field_70165_t), // posX - use floor for consistency
             y: Math.floor(player.field_70163_u), // posY  
             z: Math.floor(player.field_70161_v)  // posZ
@@ -381,7 +381,7 @@ class ChatTriggersPathfinder {
         }
 
         // Check if we've reached the target
-        const distanceToTarget = this.heuristic(playerPos, this.target)
+        const distanceToTarget = this.heuristic(rawStartPos, this.target)
         if (distanceToTarget < CONFIG.arrivalDistance) {
             if (CONFIG.debug) {
                 ChatLib.chat("&aReached target!")
@@ -393,14 +393,20 @@ class ChatTriggersPathfinder {
         // Generate new path if needed
         if (!this.currentPath || this.currentPathIndex >= this.currentPath.length) {
             if (CONFIG.debug) {
-                ChatLib.chat(`&7Generating path from ${playerPos.x},${playerPos.y},${playerPos.z} to ${rawGoalPos.x},${rawGoalPos.y},${rawGoalPos.z}`)
+                ChatLib.chat(`&7Generating path from ${rawStartPos.x},${rawStartPos.y},${rawStartPos.z} to ${rawGoalPos.x},${rawGoalPos.y},${rawGoalPos.z}`)
             }
+
+            const resolvedStart = this.resolveGoalToWalkable(rawStartPos)
+            if (!resolvedStart) {
+                ChatLib.chat("&cYour current position is not in or near a walkable space")
+                this.stopPathfinding()
+                return
+            }
+            const playerPos = resolvedStart
 
             const resolvedGoal = this.resolveGoalToWalkable(rawGoalPos)
             if (!resolvedGoal) {
-                if (CONFIG.debug) {
-                    ChatLib.chat("&cTarget is not reachable: no nearby walkable space")
-                }
+                ChatLib.chat("&cTarget is not reachable: no nearby walkable space")
                 this.stopPathfinding()
                 return
             }
@@ -413,9 +419,7 @@ class ChatTriggersPathfinder {
             this.currentPathIndex = 0
 
             if (!this.currentPath || this.currentPath.length === 0) {
-                if (CONFIG.debug) {
-                    ChatLib.chat("&cNo path found!")
-                }
+                ChatLib.chat("&cNo path found!")
                 this.stopPathfinding()
                 return
             }
